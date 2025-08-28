@@ -1,3 +1,7 @@
+Version 0.1.9 (28 Aug 2025)
+---------------------------------
+* Bump CMake minimum version to 3.11 for compatibility with CMake >= 4.0
+
 Version 0.1.8 (17 Mar 2025)
 ---------------------------------
 * Bump CMake minimum version to 3.5 for compatibility with CMake >= 3.27.
