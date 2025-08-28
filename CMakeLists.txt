@@ -1,9 +1,9 @@
 # Minimum version required
-cmake_minimum_required (VERSION 3.5)
+cmake_minimum_required (VERSION 3.11)
 
 set(QDLDL_VERSION_MAJOR "0")
 set(QDLDL_VERSION_MINOR "1")
-set(QDLDL_VERSION_PATCH "8")
+set(QDLDL_VERSION_PATCH "9")
 set(QDLDL_VERSION "${QDLDL_VERSION_MAJOR}.${QDLDL_VERSION_MINOR}.${QDLDL_VERSION_PATCH}")
 
 # Project name
