@@ -261,6 +261,36 @@ QDLDL_int QDLDL_factor(const QDLDL_int n, const QDLDL_int* Ap, const QDLDL_int* 
     return positiveValuesInD;
 }
 
+OSQPInt QDLDL_factor_partial(qdldl_solver* s, OSQPInt k) {
+    // This works on the existing KKT matrix stored inside the solver
+    OSQPCscMatrix* A = s->KKT;
+
+    OSQPFloat akk = 0.0;
+
+    // Find diagonal entry in column k
+    OSQPInt col_start = A->p[k];
+    OSQPInt col_end   = A->p[k+1];
+
+    for (OSQPInt i = col_start; i < col_end; i++) {
+        if (A->i[i] == k) {  // diagonal element
+            akk = A->x[i];
+            break;
+        }
+    }
+
+    if (akk == 0.0) {
+        return -1;  // cannot factor if diagonal is zero
+    }
+
+    // Update D and Dinv for this column only
+    s->D[k]    = akk;
+    s->Dinv[k] = 1.0 / akk;
+
+    return 0;
+}
+
+
+
 // Solves (L+I)x = b
 void QDLDL_Lsolve(const QDLDL_int n, const QDLDL_int* Lp, const QDLDL_int* Li,
                   const QDLDL_float* Lx, QDLDL_float* x) {
