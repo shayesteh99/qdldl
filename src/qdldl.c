@@ -261,33 +261,78 @@ QDLDL_int QDLDL_factor(const QDLDL_int n, const QDLDL_int* Ap, const QDLDL_int* 
     return positiveValuesInD;
 }
 
-OSQPInt QDLDL_factor_partial(qdldl_solver* s, OSQPInt k) {
-    // This works on the existing KKT matrix stored inside the solver
-    OSQPCscMatrix* A = s->KKT;
+QDLDL_int QDLDL_factor_partial(qdldl_solver* s, QDLDL_int k) {
+    QDLDL_csc* A = s->KKT;  // Use QDLDL's own CSC matrix
+    QDLDL_int n = A->n;
 
-    OSQPFloat akk = 0.0;
+    // --- 1. Extract the diagonal entry A[k,k] ---
+    QDLDL_float akk = 0.0;
+    QDLDL_int col_start = A->p[k];
+    QDLDL_int col_end   = A->p[k+1];
 
-    // Find diagonal entry in column k
-    OSQPInt col_start = A->p[k];
-    OSQPInt col_end   = A->p[k+1];
-
-    for (OSQPInt i = col_start; i < col_end; i++) {
-        if (A->i[i] == k) {  // diagonal element
+    for (QDLDL_int i = col_start; i < col_end; i++) {
+        if (A->i[i] == k) {
             akk = A->x[i];
             break;
         }
     }
 
     if (akk == 0.0) {
-        return -1;  // cannot factor if diagonal is zero
+        return -1;  // LDL cannot proceed if diagonal is zero
     }
 
-    // Update D and Dinv for this column only
-    s->D[k]    = akk;
-    s->Dinv[k] = 1.0 / akk;
+    // Initialize D[k] with the diagonal
+    s->D[k] = akk;
+
+    // --- 2. Compute y = L \ b  (only uses columns < k) ---
+    // Copy b into y workspace
+    for (QDLDL_int i = 0; i < k; i++) {
+        s->yVals[i] = 0.0;
+        s->yMarkers[i] = QDLDL_UNUSED;
+    }
+
+    // Fill b into y workspace
+    for (QDLDL_int i = col_start; i < col_end; i++) {
+        QDLDL_int row = A->i[i];
+        if (row < k) {
+            s->yVals[row] = A->x[i];
+        }
+    }
+
+    // Forward solve: y = L \ b
+    QDLDL_Lsolve(k, s->Lp, s->Li, s->Lx, s->yVals);
+
+    // --- 3. Update D[k] by subtracting contributions ---
+    for (QDLDL_int i = 0; i < k; i++) {
+        QDLDL_float yi = s->yVals[i];
+        if (yi != 0.0) {
+            // Find L[k,i] position in column i
+            QDLDL_int lcol_end = s->LNextSpaceInCol[i];
+            for (QDLDL_int j = s->Lp[i]; j < lcol_end; j++) {
+                if (s->Li[j] == k) {
+                    s->D[k] -= yi * s->Lx[j];
+                    break;
+                }
+            }
+        }
+    }
+
+    if (s->D[k] == 0.0) {
+        return -1;
+    }
+
+    // --- 4. Set the inverse diagonal ---
+    s->Dinv[k] = 1.0 / s->D[k];
+
+    // --- 5. Reset workspaces ---
+    for (QDLDL_int i = 0; i < k; i++) {
+        s->yVals[i] = 0.0;
+        s->yMarkers[i] = QDLDL_UNUSED;
+    }
 
     return 0;
 }
+
 
 
 
