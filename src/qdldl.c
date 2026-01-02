@@ -261,77 +261,102 @@ QDLDL_int QDLDL_factor(const QDLDL_int n, const QDLDL_int* Ap, const QDLDL_int* 
     return positiveValuesInD;
 }
 
-QDLDL_int QDLDL_factor_partial(qdldl_solver* s, QDLDL_int k) {
-    QDLDL_csc* A = s->KKT;  // Use QDLDL's own CSC matrix
-    QDLDL_int n = A->n;
+QDLDL_int QDLDL_factor_partial(
+    const QDLDL_int n,
+    const QDLDL_int* Ap,
+    const QDLDL_int* Ai,
+    const QDLDL_float* Ax,
+    QDLDL_int* Lp,
+    QDLDL_int* Li,
+    QDLDL_float* Lx,
+    QDLDL_float* D,
+    QDLDL_float* Dinv,
+    const QDLDL_int* Lnz,
+    const QDLDL_int* etree,
+    QDLDL_bool* bwork,
+    QDLDL_int* iwork,
+    QDLDL_float* fwork,
+    QDLDL_int k
+) {
+    QDLDL_int i, j, nnzY, bidx, cidx, tmpIdx, nextIdx, nnzE;
 
-    // --- 1. Extract the diagonal entry A[k,k] ---
-    QDLDL_float akk = 0.0;
-    QDLDL_int col_start = A->p[k];
-    QDLDL_int col_end   = A->p[k+1];
+    // Workspaces
+    QDLDL_int* yIdx = iwork;           // length n
+    QDLDL_int* elimBuffer = iwork + n; // length n
+    QDLDL_int* LNextSpaceInCol = iwork + 2*n; // length n
+    QDLDL_float* yVals = fwork;        // length n
+    QDLDL_bool* yMarkers = bwork;      // length n
 
-    for (QDLDL_int i = col_start; i < col_end; i++) {
-        if (A->i[i] == k) {
-            akk = A->x[i];
-            break;
+    // Initialize workspaces for column k
+    for(i = 0; i < n; i++) {
+        yVals[i] = 0.0;
+        yMarkers[i] = QDLDL_UNUSED;
+        LNextSpaceInCol[i] = Lp[i];
+    }
+
+    // Step 1: Copy kth column into workspace
+    for(i = Ap[k]; i < Ap[k+1]; i++) {
+        bidx = Ai[i];
+        if(bidx == k) {
+            D[k] = Ax[i];        // diagonal
+        } else if(bidx < k) {
+            yVals[bidx] = Ax[i]; // off-diagonal below k
         }
     }
 
-    if (akk == 0.0) {
-        return -1;  // LDL cannot proceed if diagonal is zero
+    if(D[k] == 0.0) {
+        return -1; // cannot factorize
     }
 
-    // Initialize D[k] with the diagonal
-    s->D[k] = akk;
+    // Step 2: Forward elimination along the elimination tree
+    nnzY = 0;
+    for(i = Ap[k]; i < Ap[k+1]; i++) {
+        bidx = Ai[i];
+        if(bidx >= k) continue;
 
-    // --- 2. Compute y = L \ b  (only uses columns < k) ---
-    // Copy b into y workspace
-    for (QDLDL_int i = 0; i < k; i++) {
-        s->yVals[i] = 0.0;
-        s->yMarkers[i] = QDLDL_UNUSED;
-    }
+        if(yMarkers[bidx] == QDLDL_UNUSED) {
+            yMarkers[bidx] = QDLDL_USED;
+            elimBuffer[0] = bidx;
+            nnzE = 1;
 
-    // Fill b into y workspace
-    for (QDLDL_int i = col_start; i < col_end; i++) {
-        QDLDL_int row = A->i[i];
-        if (row < k) {
-            s->yVals[row] = A->x[i];
-        }
-    }
+            nextIdx = etree[bidx];
+            while(nextIdx != QDLDL_UNKNOWN && nextIdx < k) {
+                if(yMarkers[nextIdx] == QDLDL_USED) break;
+                yMarkers[nextIdx] = QDLDL_USED;
+                elimBuffer[nnzE++] = nextIdx;
+                nextIdx = etree[nextIdx];
+            }
 
-    // Forward solve: y = L \ b
-    QDLDL_Lsolve(k, s->Lp, s->Li, s->Lx, s->yVals);
-
-    // --- 3. Update D[k] by subtracting contributions ---
-    for (QDLDL_int i = 0; i < k; i++) {
-        QDLDL_float yi = s->yVals[i];
-        if (yi != 0.0) {
-            // Find L[k,i] position in column i
-            QDLDL_int lcol_end = s->LNextSpaceInCol[i];
-            for (QDLDL_int j = s->Lp[i]; j < lcol_end; j++) {
-                if (s->Li[j] == k) {
-                    s->D[k] -= yi * s->Lx[j];
-                    break;
-                }
+            while(nnzE) {
+                yIdx[nnzY++] = elimBuffer[--nnzE];
             }
         }
     }
 
-    if (s->D[k] == 0.0) {
-        return -1;
+    // Step 3: Compute L column values for kth column
+    for(i = nnzY-1; i >= 0; i--) {
+        cidx = yIdx[i];
+        tmpIdx = LNextSpaceInCol[cidx];
+        QDLDL_float y_c = yVals[cidx];
+
+        for(j = Lp[cidx]; j < tmpIdx; j++) {
+            y_c -= Lx[j] * yVals[Li[j]];
+        }
+
+        Li[tmpIdx] = k;
+        Lx[tmpIdx] = y_c * Dinv[cidx];
+        D[k] -= y_c * Lx[tmpIdx];
+        LNextSpaceInCol[cidx]++;
+        yVals[cidx] = 0.0;
+        yMarkers[cidx] = QDLDL_UNUSED;
     }
 
-    // --- 4. Set the inverse diagonal ---
-    s->Dinv[k] = 1.0 / s->D[k];
-
-    // --- 5. Reset workspaces ---
-    for (QDLDL_int i = 0; i < k; i++) {
-        s->yVals[i] = 0.0;
-        s->yMarkers[i] = QDLDL_UNUSED;
-    }
+    if(D[k] == 0.0) return -1;
+    Dinv[k] = 1.0 / D[k];
 
     return 0;
 }
+
 
 
 
