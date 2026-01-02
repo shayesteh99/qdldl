@@ -280,6 +280,8 @@ QDLDL_int QDLDL_factor_partial(
 ) {
     QDLDL_int i, j, nnzY, bidx, cidx, tmpIdx, nextIdx, nnzE;
 
+    printf("partial updating!\n");
+
     // Workspaces
     QDLDL_int* yIdx = iwork;           // length n
     QDLDL_int* elimBuffer = iwork + n; // length n
